@@ -1,25 +1,24 @@
 # %%
 import google.generativeai as genai
 import os
+import io
 #from dotenv import load_dotenv
 
 # %%
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters
+from PIL import Image
 
 # %%
 #load_dotenv()  # Load environment variables from .env file
 
 # %%
-TG_TOKEN = os.environ['TG_API_KEY']
+TOKEN = os.environ['TG_API_KEY']
 GM_TOKEN = os.environ["GOOGLE_API_KEY"]
 
-# %%
-def main():
-
-    genai.configure(api_key=GM_TOKEN)
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    prompt = """ You are a translator and tutor for Japanese. You assist learners who are familiar with hiragana and katakana but are still beginners in their Japanese studies.
+genai.configure(api_key=GM_TOKEN)
+model = genai.GenerativeModel("gemini-1.5-flash")
+prompt = """ You are a translator and tutor for Japanese. You assist learners who are familiar with hiragana and katakana but are still beginners in their Japanese studies.
 
     Your role is to translate sentences into kanji, hiragana, and katakana, and provide an explanation of how to read the kanji/kanji readings in hiragana/katakana, along with the romanization (romaji). Please follow these steps in your response:
 
@@ -44,11 +43,51 @@ def main():
     Answer to the following message:
     """
 
-    # Создаем приложение Telegram Bot с токеном
+async def echo_message(update: Update, context):
+    # Получаем текст от пользователя и отправляем обратно
+    if update.message.text:
+        if "!"==update.message.text[0] and len(update.message.text)>1:
+            response = model.generate_content(prompt+update.message.text[1:])
+            message_limit = 4000  # Adjust for safe margin
+            response_text = response.text
+            for i in range(0, len(response_text), message_limit):
+                chunk = response_text[i:min(len(response_text), i + message_limit)]
+                await update.message.reply_text(chunk)
+
+    if update.message.photo:
+        if update.message.caption and update.message.caption[0]=='!':
+
+            # Get the highest resolution of the sent photo
+            photo_file_id = update.message.photo[-1].file_id
+
+            # Download the file
+            new_file = await context.bot.get_file(photo_file_id)
+
+            # Load the image into a PIL object
+            file_bytes = io.BytesIO()
+            await new_file.download_to_memory(out=file_bytes)
+            file_bytes.seek(0)
+
+            # Open the image with PIL
+            image = Image.open(file_bytes)
+            text_prompt = "what's written on this image?"
+            if len(update.message.caption)>1:
+                text_prompt = update.message.caption[1:]
+            response = model.generate_content([image, text_prompt])
+            message_limit = 4000  # Adjust for safe margin
+            response_text = response.text
+            for i in range(0, len(response_text), message_limit):
+                chunk = response_text[i:min(len(response_text), i + message_limit)]
+                await update.message.reply_text(chunk)
+
+
+
+def main():
+   # Создаем приложение Telegram Bot с токеном
     app = ApplicationBuilder().token(TOKEN).build()
 
     # Обработчик сообщений
-    echo_handler = MessageHandler(filters.TEXT & ~filters.COMMAND, echo_message)
+    echo_handler = MessageHandler(filters.TEXT & ~filters.COMMAND | filters.PHOTO, echo_message)
 
     # Добавляем обработчик в приложение
     app.add_handler(echo_handler)
@@ -56,11 +95,7 @@ def main():
     # Запуск бота
     app.run_polling()
 
-
-async def echo_message(update: Update, context):
-    # Получаем текст от пользователя и отправляем обратно
-    if "!"==message_text[0]:
-        response = model.generate_content(prompt+update.message.text[1:])
-        await update.message.reply_text(response.text)
+if __name__ == '__main__':
+    main()
 
 
